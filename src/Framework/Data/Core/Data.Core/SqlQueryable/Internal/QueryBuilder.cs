@@ -6,8 +6,7 @@ using Microsoft.Extensions.Logging;
 using NetModular.Lib.Data.Abstractions;
 using NetModular.Lib.Data.Abstractions.Enums;
 using NetModular.Lib.Data.Core.ExpressionResolve;
-using NetModular.Lib.Utils.Core;
-using NetModular.Lib.Utils.Core.Extensions;
+using NetModular.Lib.Data.Core.Extensions;
 
 namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
 {
@@ -107,16 +106,24 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
 
         public string SoftDeleteSqlBuild(out IQueryParameters parameters)
         {
+            var entityDescriptor = _queryBody.JoinDescriptors.First().EntityDescriptor;
+            if (!entityDescriptor.SoftDelete)
+                throw new Exception("非软删除实体无法调用该方法");
+
             var tableName = _queryBody.JoinDescriptors.First().TableName;
             Check.NotNull(tableName, nameof(tableName), "未指定更新表");
+
+            var deletedColumnName = entityDescriptor.Columns.First(m => m.PropertyInfo.Name.Equals("Deleted")).Name;
+            var deletedTimeColumnName = entityDescriptor.Columns.First(m => m.PropertyInfo.Name.Equals("DeletedTime")).Name;
+            var deletedByTimeColumnName = entityDescriptor.Columns.First(m => m.PropertyInfo.Name.Equals("DeletedBy")).Name;
 
             parameters = new QueryParameters();
 
             var sqlBuilder = new StringBuilder($"UPDATE {GetTableName(tableName)} SET ");
-            sqlBuilder.AppendFormat("{0}={1},", _sqlAdapter.AppendQuote("Deleted"), _sqlAdapter.SqlDialect == SqlDialect.PostgreSQL ? "TRUE" : "1");
-            sqlBuilder.AppendFormat("{0}={1},", _sqlAdapter.AppendQuote("DeletedTime"), _sqlAdapter.AppendParameter("P1"));
+            sqlBuilder.AppendFormat("{0}={1},", _sqlAdapter.AppendQuote(deletedColumnName), _sqlAdapter.SqlDialect == SqlDialect.PostgreSQL ? "TRUE" : "1");
+            sqlBuilder.AppendFormat("{0}={1},", _sqlAdapter.AppendQuote(deletedTimeColumnName), _sqlAdapter.AppendParameter("P1"));
             parameters.Add(DateTime.Now);
-            sqlBuilder.AppendFormat("{0}={1} ", _sqlAdapter.AppendQuote("DeletedBy"), _sqlAdapter.AppendParameter("P2"));
+            sqlBuilder.AppendFormat("{0}={1} ", _sqlAdapter.AppendQuote(deletedByTimeColumnName), _sqlAdapter.AppendParameter("P2"));
 
             var deleteBy = Guid.Empty;
             if (_dbContext.LoginInfo != null)
@@ -229,8 +236,16 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
 
         public string QuerySqlBuild(out IQueryParameters parameters)
         {
-            string sql;
             parameters = new QueryParameters();
+            return QuerySqlBuild(parameters);
+        }
+
+        public string QuerySqlBuild(IQueryParameters parameters)
+        {
+            if (parameters == null)
+                throw new ArgumentNullException("参数集合不能为null");
+
+            string sql;
 
             //分页查询
             if (_queryBody.Take > 0)
@@ -282,30 +297,79 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
 
         public string GroupBySqlBuild(out IQueryParameters parameters)
         {
+            string sql;
             parameters = new QueryParameters();
-            var sqlBuilder = new StringBuilder("SELECT ");
+            //分页查询
+            if (_queryBody.Take > 0)
+            {
+                var select = ResolveSelect();
+                var from = ResolveFrom(parameters);
+                var where = ResolveWhere(parameters);
+                var groupBy = ResolveGroupBy();
+                var having = ResolveHaving(parameters);
+                var sort = ResolveOrder();
 
-            Check.NotNull(_queryBody.Select, nameof(_queryBody.Select), "未指定Select");
-            ResolveSelect(sqlBuilder);
+                #region ==SqlServer分页需要指定排序==
 
-            sqlBuilder.Append(" FROM ");
+                //SqlServer分页需要指定排序，此处判断是否有主键，有主键默认按照主键排序
+                if (_sqlAdapter.SqlDialect == SqlDialect.SqlServer && sort.IsNull())
+                {
+                    var first = _queryBody.JoinDescriptors.First();
+                    if (first.EntityDescriptor.PrimaryKey.IsNo())
+                    {
+                        throw new Exception("SqlServer数据库没有主键的表需要指定排序字段才可以分页查询");
+                    }
 
-            ResolveFrom(sqlBuilder, parameters);
+                    sort = _queryBody.JoinDescriptors.Count > 1 ? $"{_sqlAdapter.AppendQuote(first.Alias)}.{_sqlAdapter.AppendQuote(first.EntityDescriptor.PrimaryKey.Name)}" : first.EntityDescriptor.PrimaryKey.Name;
+                }
 
-            ResolveWhere(sqlBuilder, parameters);
+                #endregion
 
-            ResolveGroupBy(sqlBuilder);
+                sql = _sqlAdapter.GeneratePagingSql(select, from, where, sort, _queryBody.Skip, _queryBody.Take, groupBy, having);
+            }
+            else
+            {
+                var sqlBuilder = new StringBuilder("SELECT ");
 
-            ResolveHaving(sqlBuilder, parameters);
+                Check.NotNull(_queryBody.Select, nameof(_queryBody.Select), "未指定Select");
+                ResolveSelect(sqlBuilder);
 
-            ResolveOrder(sqlBuilder);
+                sqlBuilder.Append(" FROM ");
 
-            string sql = sqlBuilder.ToString();
+                ResolveFrom(sqlBuilder, parameters);
+
+                ResolveWhere(sqlBuilder, parameters);
+
+                ResolveGroupBy(sqlBuilder);
+
+                ResolveHaving(sqlBuilder, parameters);
+
+                ResolveOrder(sqlBuilder);
+
+                sql = sqlBuilder.ToString();
+            }
+
             _logger?.LogDebug("GroupBy:{0}", sql);
 
             return sql;
         }
 
+        public string GroupByFirstSqlBuild(out IQueryParameters parameters)
+        {
+            parameters = new QueryParameters();
+            var select = ResolveSelect();
+            var from = ResolveFrom(parameters);
+            var where = ResolveWhere(parameters);
+            var groupBy = ResolveGroupBy();
+            var having = ResolveHaving(parameters);
+            var sort = ResolveOrder();
+
+            var sql = _sqlAdapter.GenerateFirstSql(select, from, where, sort, groupBy, having);
+
+            _logger?.LogDebug("GroupByFirst:" + sql);
+
+            return sql;
+        }
         #endregion
 
         #region ==解析Body==
@@ -324,10 +388,21 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             if (_queryBody.JoinDescriptors.Count == 1)
             {
                 sqlBuilder.AppendFormat(" {0} ", GetTableName(first.TableName));
+
+                //附加NOLOCK特性
+                if (_sqlAdapter.SqlDialect == SqlDialect.SqlServer && first.NoLock)
+                {
+                    sqlBuilder.Append("WITH (NOLOCK) ");
+                }
                 return;
             }
 
             sqlBuilder.AppendFormat(" {0} AS {1} ", GetTableName(first.TableName), _sqlAdapter.AppendQuote(first.Alias));
+            //附加NOLOCK特性
+            if (_sqlAdapter.SqlDialect == SqlDialect.SqlServer && first.NoLock)
+            {
+                sqlBuilder.Append("WITH (NOLOCK) ");
+            }
 
             for (var i = 1; i < _queryBody.JoinDescriptors.Count; i++)
             {
@@ -345,8 +420,14 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                         break;
                 }
 
-                sqlBuilder.AppendFormat("JOIN {0} AS {1} ON ", GetTableName(descriptor.TableName, descriptor.EntityDescriptor.SqlAdapter.Database), _sqlAdapter.AppendQuote(descriptor.Alias));
+                sqlBuilder.AppendFormat("JOIN {0} AS {1} ", GetTableName(descriptor.TableName, descriptor.EntityDescriptor.SqlAdapter.Database), _sqlAdapter.AppendQuote(descriptor.Alias));
+                //附加NOLOCK特性
+                if (_sqlAdapter.SqlDialect == SqlDialect.SqlServer && first.NoLock)
+                {
+                    sqlBuilder.Append("WITH (NOLOCK) ");
+                }
 
+                sqlBuilder.Append("ON ");
                 sqlBuilder.Append(_resolver.Resolve(descriptor.On, parameters));
             }
         }
@@ -357,14 +438,20 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             for (var i = 0; i < _queryBody.Where.Count; i++)
             {
                 var w = _queryBody.Where[i];
-                if (w.Type == QueryWhereType.LambdaExpression)
+                switch (w.Type)
                 {
-                    whereSql.Append(_resolver.Resolve(w.Expression, parameters));
+                    case QueryWhereType.LambdaExpression:
+                        whereSql.Append(_resolver.Resolve(w.Expression, parameters));
+                        break;
+                    case QueryWhereType.SubQuery:
+                        var subSql = w.SubQueryable.ToSql(parameters);
+                        whereSql.AppendFormat("{0} {1} ({2}) ", _resolver.Resolve(w.SubQueryColumn, parameters), w.SubQueryOperator.ToDescription(), subSql);
+                        break;
+                    case QueryWhereType.Sql:
+                        whereSql.AppendFormat(" ({0}) ", w.Sql);
+                        break;
                 }
-                else
-                {
-                    whereSql.AppendFormat(" ({0}) ", w.Sql);
-                }
+
                 if (i < _queryBody.Where.Count - 1)
                 {
                     whereSql.Append(" AND ");
@@ -376,19 +463,22 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                 var val = _sqlAdapter.SqlDialect == SqlDialect.PostgreSQL ? "FALSE" : "0";
                 var sb = new StringBuilder();
 
-                var first = _queryBody.JoinDescriptors.First();
                 if (_queryBody.JoinDescriptors.Count == 1)
                 {
-                    if (first.EntityDescriptor.SoftDelete)
+                    //单表
+                    var descriptor = _queryBody.JoinDescriptors.First().EntityDescriptor;
+                    if (descriptor.SoftDelete)
                     {
-                        sb.AppendFormat("AND {0}={1} ", _sqlAdapter.AppendQuote("Deleted"), val);
+                        sb.AppendFormat("AND {0}={1} ", _sqlAdapter.AppendQuote(descriptor.GetDeletedColumnName()), val);
                     }
                 }
                 else
                 {
+                    //多表
+                    var first = _queryBody.JoinDescriptors.First();
                     if (first.EntityDescriptor.SoftDelete)
                     {
-                        sb.AppendFormat("AND {0}.{1}={2} ", _sqlAdapter.AppendQuote(first.Alias), _sqlAdapter.AppendQuote("Deleted"), val);
+                        sb.AppendFormat("AND {0}.{1}={2} ", _sqlAdapter.AppendQuote(first.Alias), _sqlAdapter.AppendQuote(first.EntityDescriptor.GetDeletedColumnName()), val);
                     }
 
                     for (var i = 1; i < _queryBody.JoinDescriptors.Count; i++)
@@ -396,7 +486,7 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                         var descriptor = _queryBody.JoinDescriptors[i];
                         if (descriptor.Type == JoinType.Inner && descriptor.EntityDescriptor.SoftDelete)
                         {
-                            sb.AppendFormat("AND {0}.{1}={2} ", _sqlAdapter.AppendQuote(descriptor.Alias), _sqlAdapter.AppendQuote("Deleted"), val);
+                            sb.AppendFormat("AND {0}.{1}={2} ", _sqlAdapter.AppendQuote(descriptor.Alias), _sqlAdapter.AppendQuote(descriptor.EntityDescriptor.GetDeletedColumnName()), val);
                         }
                     }
                 }
@@ -531,46 +621,27 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                 //方法
                 if (arg is MethodCallExpression methodCallExp)
                 {
-                    var methodName = methodCallExp.Method.Name;
-                    if (methodName.Equals("Substring"))
+                    var methodName = methodCallExp.Method.Name.ToUpper();
+                    switch (methodName)
                     {
-                        ResolveSelectForSubstring(methodCallExp, sqlBuilder, fullExpression, alias);
-                        continue;
-                    }
-                    if (methodName.Equals("ToLower"))
-                    {
-                        ResolveSelectForToLower(methodCallExp, sqlBuilder, fullExpression, alias);
-                        continue;
-                    }
-                    if (methodName.Equals("ToUpper"))
-                    {
-                        ResolveSelectForToUpper(methodCallExp, sqlBuilder, fullExpression, alias);
-                        continue;
-                    }
-                    if (methodName.Equals("Count"))
-                    {
-                        sqlBuilder.AppendFormat("COUNT(0) AS {0},", alias);
-                        continue;
-                    }
-
-                    if (methodName.Equals("Sum"))
-                    {
-                        ResolveSelectForFunc(methodCallExp, sqlBuilder, "SUM", alias);
-                        continue;
-                    }
-                    if (methodName.Equals("Avg"))
-                    {
-                        ResolveSelectForFunc(methodCallExp, sqlBuilder, "AVG", alias);
-                        continue;
-                    }
-                    if (methodName.Equals("Max"))
-                    {
-                        ResolveSelectForFunc(methodCallExp, sqlBuilder, "MAX", alias);
-                        continue;
-                    }
-                    if (methodName.Equals("Min"))
-                    {
-                        ResolveSelectForFunc(methodCallExp, sqlBuilder, "MIN", alias);
+                        case "SUBSTRING":
+                            ResolveSelectForSubstring(methodCallExp, sqlBuilder, fullExpression, alias);
+                            continue;
+                        case "TOLOWER":
+                            ResolveSelectForToLower(methodCallExp, sqlBuilder, fullExpression, alias);
+                            continue;
+                        case "TOUPPER":
+                            ResolveSelectForToUpper(methodCallExp, sqlBuilder, fullExpression, alias);
+                            continue;
+                        case "COUNT":
+                            sqlBuilder.AppendFormat("COUNT(0) AS {0},", alias);
+                            continue;
+                        case "SUM":
+                        case "AVG":
+                        case "MAX":
+                        case "MIN":
+                            ResolveSelectForFunc(methodCallExp, sqlBuilder, methodName, alias);
+                            continue;
                     }
                 }
             }
@@ -588,13 +659,26 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             if (!(exp is MemberExpression memberExp))
                 return;
 
-            alias = alias ?? memberExp.Member.Name;
+            alias ??= memberExp.Member.Name;
             if (memberExp.Expression.NodeType == ExpressionType.MemberAccess)
             {
                 //分组查询
                 if (_queryBody.IsGroupBy)
                 {
-                    var descriptor = _queryBody.GroupByPropertyList.FirstOrDefault(m => _sqlAdapter.AppendQuote(m.Alias) == alias || m.Name == memberExp.Member.Name);
+                    GroupByJoinDescriptor descriptor;
+                    if (_queryBody.JoinDescriptors.Count > 1)
+                    {
+                        //如果是多表连接分组查询，可能存在字段名称重复的情况，所以需要通过字段的实体类型过滤
+                        descriptor = _queryBody.GroupByPropertyList.FirstOrDefault(m =>
+                           m.JoinDescriptor.EntityDescriptor.EntityType == memberExp.Expression.Type &&
+                           (_sqlAdapter.AppendQuote(m.Alias) == alias || m.Name == memberExp.Member.Name));
+                    }
+                    else
+                    {
+                        descriptor = _queryBody.GroupByPropertyList.FirstOrDefault(m =>
+                            (_sqlAdapter.AppendQuote(m.Alias) == alias || m.Name == memberExp.Member.Name));
+                    }
+
                     if (descriptor != null)
                     {
                         var colName = _queryBody.GetColumnName(descriptor.Name, descriptor.JoinDescriptor);
@@ -725,22 +809,39 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
         /// <param name="sqlBuilder"></param>
         private void ResolveGroupBy(StringBuilder sqlBuilder)
         {
-            sqlBuilder.Append(" GROUP BY ");
-
-            var list = _queryBody.GroupByPropertyList;
-            var i = 0;
-            foreach (var p in list)
+            if (_queryBody.GroupBy != null && _queryBody.GroupByPropertyList.Any())
             {
-                var colName = _queryBody.GetColumnName(p.Name, p.JoinDescriptor);
-                sqlBuilder.AppendFormat("{0}", colName);
+                sqlBuilder.Append(" GROUP BY ");
 
-                if (i < list.Count - 1)
+                var list = _queryBody.GroupByPropertyList;
+                var i = 0;
+                foreach (var p in list)
                 {
-                    sqlBuilder.Append(",");
-                }
+                    var colName = _queryBody.GetColumnName(p.Name, p.JoinDescriptor);
+                    sqlBuilder.AppendFormat("{0}", colName);
 
-                i++;
+                    if (i < list.Count - 1)
+                    {
+                        sqlBuilder.Append(",");
+                    }
+
+                    i++;
+                }
             }
+            else
+            {
+                sqlBuilder.Append(" GROUP BY 1");
+            }
+        }
+
+        /// <summary>
+        /// 解析分组条件
+        /// </summary>
+        private string ResolveGroupBy()
+        {
+            var sqlBuilder = new StringBuilder();
+            ResolveGroupBy(sqlBuilder);
+            return sqlBuilder.ToString();
         }
 
         /// <summary>
@@ -761,6 +862,17 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             if (havingSql.Length > 0)
                 sqlBuilder.AppendFormat(" HAVING {0} ", havingSql);
         }
+
+        /// <summary>
+        /// 解析聚合过滤条件
+        /// </summary>
+        private string ResolveHaving(IQueryParameters parameters)
+        {
+            var havingSql = new StringBuilder();
+            ResolveHaving(havingSql, parameters);
+            return havingSql.ToString();
+        }
+
         #endregion
 
         /// <summary>
@@ -775,9 +887,9 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             if (descriptor != null && descriptor.IsEntityBase)
             {
                 var p1 = parameters.Add(_dbContext.LoginInfo.AccountId);
-                sqlBuilder.AppendFormat(",{0}=@{1}", _sqlAdapter.AppendQuote("ModifiedBy"), p1);
+                sqlBuilder.AppendFormat(",{0}=@{1}", _sqlAdapter.AppendQuote(descriptor.GetModifiedByColumnName()), p1);
                 var p2 = parameters.Add(DateTime.Now);
-                sqlBuilder.AppendFormat(",{0}=@{1}", _sqlAdapter.AppendQuote("ModifiedTime"), p2);
+                sqlBuilder.AppendFormat(",{0}=@{1}", _sqlAdapter.AppendQuote(descriptor.GetModifiedTimeColumnName()), p2);
             }
         }
 

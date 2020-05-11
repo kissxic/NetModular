@@ -10,8 +10,6 @@ using NetModular.Lib.Data.Abstractions.SqlQueryable;
 using NetModular.Lib.Data.Abstractions.SqlQueryable.GroupByQueryable;
 using NetModular.Lib.Data.Core.SqlQueryable.GroupByQueryable;
 using NetModular.Lib.Data.Core.SqlQueryable.Internal;
-using NetModular.Lib.Utils.Core;
-using NetModular.Lib.Utils.Core.Extensions;
 
 namespace NetModular.Lib.Data.Core.SqlQueryable
 {
@@ -24,7 +22,7 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
         where TEntity5 : IEntity, new()
         where TEntity6 : IEntity, new()
     {
-        public NetSqlQueryable(IDbSet dbSet, QueryBody queryBody, Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, bool>> onExpression, JoinType joinType = JoinType.Left, string tableName = null)
+        public NetSqlQueryable(IDbSet dbSet, QueryBody queryBody, Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, bool>> onExpression, JoinType joinType = JoinType.Left, string tableName = null, bool noLock = true)
             : base(dbSet, queryBody)
         {
             Check.NotNull(onExpression, nameof(onExpression), "请输入连接条件");
@@ -35,11 +33,16 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
                 Alias = "T6",
                 EntityDescriptor = EntityDescriptorCollection.Get<TEntity6>(),
                 On = onExpression,
+                NoLock = noLock
             };
             t6.TableName = tableName.NotNull() ? tableName : t6.EntityDescriptor.TableName;
             QueryBody.JoinDescriptors.Add(t6);
 
             QueryBody.WhereDelegateType = typeof(Func<,,,,,,>).MakeGenericType(typeof(TEntity), typeof(TEntity2), typeof(TEntity3), typeof(TEntity4), typeof(TEntity5), typeof(TEntity6), typeof(bool));
+        }
+
+        private NetSqlQueryable(IDbSet dbSet, QueryBody queryBody) : base(dbSet, queryBody)
+        {
         }
 
         #region ==UseUow==
@@ -218,6 +221,12 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
             return this;
         }
 
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6> Where<TKey>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TKey>> key, QueryOperator queryOperator, INetSqlQueryable queryable)
+        {
+            QueryBody.SetWhere(key, queryOperator, queryable);
+            return this;
+        }
+
         public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6> Limit(int skip, int take)
         {
             QueryBody.SetLimit(skip, take);
@@ -230,19 +239,19 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
             return this;
         }
 
-        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7> LeftJoin<TEntity7>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, bool>> onExpression, string tableName = null) where TEntity7 : IEntity, new()
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7> LeftJoin<TEntity7>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, bool>> onExpression, string tableName = null, bool noLock = true) where TEntity7 : IEntity, new()
         {
-            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7>(Db, QueryBody, onExpression, JoinType.Left, tableName);
+            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7>(Db, QueryBody, onExpression, JoinType.Left, tableName, noLock);
         }
 
-        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7> InnerJoin<TEntity7>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, bool>> onExpression, string tableName = null) where TEntity7 : IEntity, new()
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7> InnerJoin<TEntity7>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, bool>> onExpression, string tableName = null, bool noLock = true) where TEntity7 : IEntity, new()
         {
-            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7>(Db, QueryBody, onExpression, JoinType.Inner, tableName);
+            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7>(Db, QueryBody, onExpression, JoinType.Inner, tableName, noLock);
         }
 
-        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7> RightJoin<TEntity7>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, bool>> onExpression, string tableName = null) where TEntity7 : IEntity, new()
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7> RightJoin<TEntity7>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, bool>> onExpression, string tableName = null, bool noLock = true) where TEntity7 : IEntity, new()
         {
-            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7>(Db, QueryBody, onExpression, JoinType.Right, tableName);
+            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7>(Db, QueryBody, onExpression, JoinType.Right, tableName, noLock);
         }
 
         public TResult Max<TResult>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TResult>> expression)
@@ -290,6 +299,11 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
             return new GroupByQueryable6<TResult, TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6>(Db, QueryBody, QueryBuilder, expression);
         }
 
+        public IGroupByQueryable6<INetSqlGroupingKey6<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6>, TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6> GroupBy()
+        {
+            return new GroupByQueryable6<INetSqlGroupingKey6<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6>, TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6>(Db, QueryBody, QueryBuilder, null);
+        }
+
         public new IList<TEntity> ToList()
         {
             return ToList<TEntity>();
@@ -324,6 +338,11 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
         {
             QueryBody.FilterDeleted = false;
             return this;
+        }
+
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6> Copy()
+        {
+            return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6>(Db, QueryBody.Copy());
         }
     }
 }

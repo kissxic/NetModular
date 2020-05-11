@@ -20,6 +20,9 @@ namespace NetModular.Lib.Module.AspNetCore
                     //加载程序集信息并将当前模块信息添加在集合
                     LoadAssemblyDescriptor(moduleDescriptor);
 
+                    //加枚举信息
+                    LoadEnumDescriptors(moduleDescriptor);
+
                     //加载服务配置器
                     LoadServicesConfigurator(moduleDescriptor);
 
@@ -39,12 +42,12 @@ namespace NetModular.Lib.Module.AspNetCore
             //此处默认模块命名空间前缀与当前项目相同
             var assemblyDescriptor = new ModuleAssemblyDescriptor
             {
-                Domain = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Id}.Domain"),
-                Infrastructure = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Id}.Infrastructure"),
-                Application = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Id}.Application"),
-                Quartz = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Id}.Quartz"),
-                Web = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Id}.Web"),
-                Api = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Id}.Api"),
+                Domain = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Code}.Domain"),
+                Infrastructure = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Code}.Infrastructure"),
+                Application = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Code}.Application"),
+                Quartz = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Code}.Quartz"),
+                Web = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Code}.Web"),
+                Api = AssemblyHelper.LoadByNameEndString($"Module.{moduleDescriptor.Code}.Api"),
             };
 
             CheckAssemblyDescriptor(moduleDescriptor, assemblyDescriptor);

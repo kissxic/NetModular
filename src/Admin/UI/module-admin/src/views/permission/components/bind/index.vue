@@ -10,10 +10,7 @@
             <el-input :value="roleName" disabled />
           </el-form-item>
           <el-form-item label="选择平台：">
-            <el-select v-model="form.model.platform" @change="refresh">
-              <el-option label="Android" :value="1"></el-option>
-              <el-option label="IOS" :value="2"></el-option>
-            </el-select>
+            <nm-platform-select v-model="form.model.platform" no-web @change="refresh" />
           </el-form-item>
         </nm-form>
       </template>
@@ -38,7 +35,7 @@
     </nm-flex>
     <template v-slot:footer>
       <nm-button type="success" text="确认" @click="onSave" />
-      <nm-button type="info" text="关闭" />
+      <nm-button type="info" text="关闭" @click="visible_ = false" />
     </template>
   </nm-dialog>
 </template>
@@ -52,7 +49,6 @@ export default {
       dialog: {
         title: '角色平台权限绑定',
         icon: 'android',
-        iconColor: '#67C23A',
         width: '600px',
         height: '90%',
         noScrollbar: true,

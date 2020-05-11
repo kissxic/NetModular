@@ -6,7 +6,6 @@ using NetModular.Lib.Data.Abstractions;
 using NetModular.Lib.Data.Abstractions.Entities;
 using NetModular.Lib.Data.Abstractions.Options;
 using NetModular.Lib.Data.Core;
-using NetModular.Lib.Utils.Core.Extensions;
 using NetModular.Lib.Utils.Core.Helpers;
 
 namespace NetModular.Lib.Data.SqlServer
@@ -38,7 +37,7 @@ namespace NetModular.Lib.Data.SqlServer
 
         public override string FuncLength => "LEN";
 
-        public override string GeneratePagingSql(string select, string table, string where, string sort, int skip, int take)
+        public override string GeneratePagingSql(string select, string table, string where, string sort, int skip, int take, string groupBy = null, string having = null)
         {
             var sqlBuilder = new StringBuilder();
 
@@ -49,6 +48,12 @@ namespace NetModular.Lib.Data.SqlServer
                 sqlBuilder.AppendFormat("SELECT {0} FROM {1}", @select, table);
                 if (!string.IsNullOrWhiteSpace(where))
                     sqlBuilder.AppendFormat(" WHERE {0}", @where);
+
+                if (groupBy.NotNull())
+                    sqlBuilder.Append(groupBy);
+
+                if (having.NotNull())
+                    sqlBuilder.Append(having);
 
                 sqlBuilder.AppendFormat(" ORDER BY {0} OFFSET {1} ROW FETCH NEXT {2} ROW ONLY", sort, skip, take);
 
@@ -70,12 +75,18 @@ namespace NetModular.Lib.Data.SqlServer
             return sqlBuilder.ToString();
         }
 
-        public override string GenerateFirstSql(string select, string table, string where, string sort)
+        public override string GenerateFirstSql(string select, string table, string where, string sort, string groupBy = null, string having = null)
         {
             var sqlBuilder = new StringBuilder();
             sqlBuilder.AppendFormat("SELECT TOP 1 {0} FROM {1}", select, table);
             if (!string.IsNullOrWhiteSpace(where))
                 sqlBuilder.AppendFormat(" WHERE {0}", where);
+
+            if (groupBy.NotNull())
+                sqlBuilder.Append(groupBy);
+
+            if (having.NotNull())
+                sqlBuilder.Append(having);
 
             if (!string.IsNullOrWhiteSpace(sort))
             {

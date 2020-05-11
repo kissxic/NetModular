@@ -58,8 +58,15 @@ namespace NetModular.Lib.Data.Core.Entities
             var maxAtt = property.GetCustomAttribute<MaxAttribute>();
             Max = maxAtt != null;
 
-            var nullableAtt = property.GetCustomAttribute<NullableAttribute>();
-            Nullable = nullableAtt != null;
+            if (property.PropertyType.IsNullable())
+            {
+                Nullable = true;
+            }
+            else
+            {
+                var nullableAtt = property.GetCustomAttribute<NullableAttribute>();
+                Nullable = nullableAtt != null;
+            }
 
             var precisionAtt = property.GetCustomAttribute<PrecisionAttribute>();
             if (precisionAtt != null)

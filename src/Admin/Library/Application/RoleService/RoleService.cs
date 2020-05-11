@@ -4,8 +4,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
 using NetModular.Lib.Auth.Abstractions;
-using NetModular.Lib.Utils.Core.Extensions;
-using NetModular.Lib.Utils.Core.Result;
 using NetModular.Module.Admin.Application.AccountService;
 using NetModular.Module.Admin.Application.RoleService.ResultModels;
 using NetModular.Module.Admin.Application.RoleService.ViewModels;
@@ -330,12 +328,14 @@ namespace NetModular.Module.Admin.Application.RoleService
                     if (await _platformPermissionRepository.AddAsync(list))
                     {
                         uow.Commit();
+                        await ClearAccountPermissionCache(model.RoleId);
                         return ResultModel.Success();
                     }
                 }
                 else
                 {
                     uow.Commit();
+                    await ClearAccountPermissionCache(model.RoleId);
                     return ResultModel.Success();
                 }
             }

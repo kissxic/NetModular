@@ -7,19 +7,20 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="3.1.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="3.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="3.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="3.1.3" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Auth\Auth.Jwt\Auth.Jwt.csproj" />
     <ProjectReference Include="..\..\Cache\Cache.Integration\Cache.Integration.csproj" />
+    <ProjectReference Include="..\..\Config\Config.Core\Config.Core.csproj" />
     <ProjectReference Include="..\..\Data\Extend\Data.Integration\Data.Integration.csproj" />
     <ProjectReference Include="..\..\Excel\Excel.Integration\Excel.Integration.csproj" />
     <ProjectReference Include="..\..\Logging\Logging.Serilog\Logging.Serilog.csproj" />
     <ProjectReference Include="..\..\Mapper\Mapper.AutoMapper\Mapper.AutoMapper.csproj" />
     <ProjectReference Include="..\..\Module\Module.AspNetCore\Module.AspNetCore.csproj" />
-    <ProjectReference Include="..\..\Options\Options.Core\Options.Core.csproj" />
+    <ProjectReference Include="..\..\OSS\OSS.Integration\OSS.Integration.csproj" />
     <ProjectReference Include="..\..\Swagger\Swagger.Core\Swagger.Core.csproj" />
     <ProjectReference Include="..\..\Utils\Utils.Core\Utils.Core.csproj" />
     <ProjectReference Include="..\..\Utils\Utils.Mvc\Utils.Mvc.csproj" />
