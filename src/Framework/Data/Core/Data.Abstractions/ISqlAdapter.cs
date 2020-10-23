@@ -179,6 +179,21 @@ namespace NetModular.Lib.Data.Abstractions
         /// <param name="databaseExists">数据库是否存在</param>
         void CreateDatabase(List<IEntityDescriptor> entityDescriptors, IDatabaseCreateEvents events, out bool databaseExists);
 
+        /// <summary>
+        /// 解析列类型名称并返回默认值
+        /// </summary>
+        /// <param name="column"></param>
+        /// <param name="defaultValue"></param>
+        string GetColumnTypeName(IColumnDescriptor column, out string defaultValue);
+
+        /// <summary>
+        /// 获取创建表Sql语句
+        /// </summary>
+        /// <param name="entityDescriptor"></param>
+        /// <param name="tableName">指定表名称</param>
+        /// <returns></returns>
+        string GetCreateTableSql(IEntityDescriptor entityDescriptor, string tableName = null);
+
         #endregion
     }
 }

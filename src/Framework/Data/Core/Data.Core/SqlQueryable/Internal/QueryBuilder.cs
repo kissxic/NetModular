@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using NetModular.Lib.Data.Abstractions;
+using NetModular.Lib.Data.Abstractions.Entities;
 using NetModular.Lib.Data.Abstractions.Enums;
 using NetModular.Lib.Data.Core.ExpressionResolve;
 using NetModular.Lib.Data.Core.Extensions;
@@ -420,6 +422,7 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                         break;
                 }
 
+                var alias = _sqlAdapter.AppendQuote(descriptor.Alias);
                 sqlBuilder.AppendFormat("JOIN {0} AS {1} ", GetTableName(descriptor.TableName, descriptor.EntityDescriptor.SqlAdapter.Database), _sqlAdapter.AppendQuote(descriptor.Alias));
                 //附加NOLOCK特性
                 if (_sqlAdapter.SqlDialect == SqlDialect.SqlServer && first.NoLock)
@@ -429,6 +432,28 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
 
                 sqlBuilder.Append("ON ");
                 sqlBuilder.Append(_resolver.Resolve(descriptor.On, parameters));
+
+                //过滤软删除
+                if (_queryBody.FilterDeleted && descriptor.EntityDescriptor.SoftDelete)
+                {
+                    var val = _sqlAdapter.SqlDialect == SqlDialect.PostgreSQL ? "FALSE" : "0";
+                    sqlBuilder.AppendFormat(" AND {0}.{1}={2} ", alias, _sqlAdapter.AppendQuote(descriptor.EntityDescriptor.GetDeletedColumnName()), val);
+                }
+
+                //添加租户过滤
+                if (_queryBody.FilterTenant && descriptor.EntityDescriptor.IsTenant)
+                {
+                    var x1 = _sqlAdapter.AppendQuote(DbConstants.TENANT_COLUMN_NAME);
+                    var tenantId = _dbContext.LoginInfo.TenantId;
+                    if (tenantId == null)
+                    {
+                        sqlBuilder.AppendFormat(" AND {0}.{1} IS NULL ", alias, x1);
+                    }
+                    else
+                    {
+                        sqlBuilder.AppendFormat(" AND {0}.{1}='{2}' ", alias, x1, tenantId);
+                    }
+                }
             }
         }
 
@@ -480,13 +505,51 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                     {
                         sb.AppendFormat("AND {0}.{1}={2} ", _sqlAdapter.AppendQuote(first.Alias), _sqlAdapter.AppendQuote(first.EntityDescriptor.GetDeletedColumnName()), val);
                     }
+                }
 
-                    for (var i = 1; i < _queryBody.JoinDescriptors.Count; i++)
+                if (sb.Length > 0)
+                {
+                    whereSql.AppendFormat(" {0}", whereSql.Length > 0 ? sb : sb.Remove(0, 3));
+                }
+            }
+
+            if (_queryBody.FilterTenant)
+            {
+                var tenantId = _dbContext.LoginInfo.TenantId;
+                var sb = new StringBuilder();
+
+                if (_queryBody.JoinDescriptors.Count == 1)
+                {
+                    //单表
+                    var descriptor = _queryBody.JoinDescriptors.First().EntityDescriptor;
+                    if (descriptor.IsTenant)
                     {
-                        var descriptor = _queryBody.JoinDescriptors[i];
-                        if (descriptor.Type == JoinType.Inner && descriptor.EntityDescriptor.SoftDelete)
+                        var x0 = _sqlAdapter.AppendQuote(DbConstants.TENANT_COLUMN_NAME);
+                        if (tenantId == null)
                         {
-                            sb.AppendFormat("AND {0}.{1}={2} ", _sqlAdapter.AppendQuote(descriptor.Alias), _sqlAdapter.AppendQuote(descriptor.EntityDescriptor.GetDeletedColumnName()), val);
+                            sb.AppendFormat("AND {0} IS NULL ", x0);
+                        }
+                        else
+                        {
+                            sb.AppendFormat("AND {0}='{1}' ", x0, tenantId);
+                        }
+                    }
+                }
+                else
+                {
+                    //多表
+                    var first = _queryBody.JoinDescriptors.First();
+                    if (first.EntityDescriptor.IsTenant)
+                    {
+                        var x0 = _sqlAdapter.AppendQuote(first.Alias);
+                        var x1 = _sqlAdapter.AppendQuote(DbConstants.TENANT_COLUMN_NAME);
+                        if (tenantId == null)
+                        {
+                            sb.AppendFormat("AND {0}.{1} IS NULL ", x0, x1);
+                        }
+                        else
+                        {
+                            sb.AppendFormat("AND {0}.{1}='{2}' ", x0, x1, tenantId);
                         }
                     }
                 }
@@ -516,7 +579,7 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
         {
             Check.NotNull(_queryBody.Update, nameof(_queryBody.Update), "未指定更新字段");
 
-            var sql = _resolver.Resolve(_queryBody.Update, parameters);
+            var sql = _resolver.Resolve(_queryBody.Update, parameters, true);
 
             Check.NotNull(sql, nameof(_queryBody.Update), "更新表达式解析失败");
 
@@ -550,30 +613,27 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
         {
             var sqlBuilder = new StringBuilder();
 
-            ResolveSelect(sqlBuilder, _queryBody.Select);
+            ResolveSelect(sqlBuilder);
 
             return sqlBuilder.ToString();
         }
 
         private void ResolveSelect(StringBuilder sqlBuilder)
         {
-            ResolveSelect(sqlBuilder, _queryBody.Select);
-        }
+            var excludeCols = ResolveSelectExcludeCols();
 
-        private void ResolveSelect(StringBuilder sqlBuilder, Expression selectExpression)
-        {
-            if (selectExpression is LambdaExpression lambda)
+            if (_queryBody.Select != null && _queryBody.Select is LambdaExpression lambda)
             {
                 //返回的整个实体
                 if (lambda.Body.NodeType == ExpressionType.Parameter)
                 {
-                    ResolveSelectForEntity(sqlBuilder);
+                    ResolveSelectForEntity(sqlBuilder, excludeCols: excludeCols);
                     return;
                 }
                 //返回的某个列
                 if (lambda.Body.NodeType == ExpressionType.MemberAccess)
                 {
-                    ResolveSelectForMember(sqlBuilder, lambda.Body, lambda);
+                    ResolveSelectForMember(sqlBuilder, lambda.Body, lambda, excludeCols: excludeCols);
                     if (sqlBuilder.Length > 0 && sqlBuilder[sqlBuilder.Length - 1] == ',')
                     {
                         sqlBuilder.Remove(sqlBuilder.Length - 1, 1);
@@ -583,12 +643,12 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                 //自定义的返回对象
                 if (lambda.Body.NodeType == ExpressionType.New)
                 {
-                    ResolveSelectForNew(sqlBuilder, lambda);
+                    ResolveSelectForNew(sqlBuilder, lambda, excludeCols);
                 }
             }
             else
             {
-                ResolveSelectForEntity(sqlBuilder);
+                ResolveSelectForEntity(sqlBuilder, excludeCols: excludeCols);
             }
 
             if (sqlBuilder[sqlBuilder.Length - 1] == ',')
@@ -597,7 +657,7 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             }
         }
 
-        private void ResolveSelectForNew(StringBuilder sqlBuilder, LambdaExpression fullExpression)
+        private void ResolveSelectForNew(StringBuilder sqlBuilder, LambdaExpression fullExpression, List<IColumnDescriptor> excludeCols = null)
         {
             if (!(fullExpression.Body is NewExpression newExp))
                 return;
@@ -615,7 +675,7 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                 //实体
                 if (arg is ParameterExpression parameterExp)
                 {
-                    ResolveSelectForEntity(sqlBuilder, fullExpression.Parameters.IndexOf(parameterExp));
+                    ResolveSelectForEntity(sqlBuilder, fullExpression.Parameters.IndexOf(parameterExp), excludeCols);
                     continue;
                 }
                 //方法
@@ -654,7 +714,8 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
         /// <param name="exp"></param>
         /// <param name="fullExpression"></param>
         /// <param name="alias"></param>
-        private void ResolveSelectForMember(StringBuilder sqlBuilder, Expression exp, LambdaExpression fullExpression, string alias = null)
+        /// <param name="excludeCols"></param>
+        private void ResolveSelectForMember(StringBuilder sqlBuilder, Expression exp, LambdaExpression fullExpression, string alias = null, List<IColumnDescriptor> excludeCols = null)
         {
             if (!(exp is MemberExpression memberExp))
                 return;
@@ -665,19 +726,8 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                 //分组查询
                 if (_queryBody.IsGroupBy)
                 {
-                    GroupByJoinDescriptor descriptor;
-                    if (_queryBody.JoinDescriptors.Count > 1)
-                    {
-                        //如果是多表连接分组查询，可能存在字段名称重复的情况，所以需要通过字段的实体类型过滤
-                        descriptor = _queryBody.GroupByPropertyList.FirstOrDefault(m =>
-                           m.JoinDescriptor.EntityDescriptor.EntityType == memberExp.Expression.Type &&
-                           (_sqlAdapter.AppendQuote(m.Alias) == alias || m.Name == memberExp.Member.Name));
-                    }
-                    else
-                    {
-                        descriptor = _queryBody.GroupByPropertyList.FirstOrDefault(m =>
-                            (_sqlAdapter.AppendQuote(m.Alias) == alias || m.Name == memberExp.Member.Name));
-                    }
+                    GroupByJoinDescriptor descriptor = _queryBody.GroupByPropertyList.FirstOrDefault(m =>
+                        _sqlAdapter.AppendQuote(m.Alias) == alias || m.Name == memberExp.Member.Name);
 
                     if (descriptor != null)
                     {
@@ -702,7 +752,10 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
             }
             else
             {
-                var colName = _queryBody.GetColumnName(memberExp, fullExpression);
+                var col = _queryBody.GetColumnDescriptor(memberExp, fullExpression, out string colName);
+                if (excludeCols != null && excludeCols.Any(m => m == col))
+                    return;
+
                 sqlBuilder.AppendFormat("{0} AS {1},", colName, alias);
             }
         }
@@ -712,14 +765,19 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
         /// </summary>
         /// <param name="sqlBuilder"></param>
         /// <param name="descriptorIndex">实体的下标</param>
-        private void ResolveSelectForEntity(StringBuilder sqlBuilder, int descriptorIndex = 0)
+        /// <param name="excludeCols">排除列</param>
+        private void ResolveSelectForEntity(StringBuilder sqlBuilder, int descriptorIndex = 0, List<IColumnDescriptor> excludeCols = null)
         {
             var descriptor = _queryBody.JoinDescriptors[descriptorIndex];
 
+            //单表时不需要别名
+            var isSingleTable = _queryBody.JoinDescriptors.Count <= 1;
+
             foreach (var col in descriptor.EntityDescriptor.Columns)
             {
-                //单表时不需要别名
-                var isSingleTable = _queryBody.JoinDescriptors.Count <= 1;
+                if (excludeCols != null && excludeCols.Any(m => m == col))
+                    continue;
+
                 sqlBuilder.Append(isSingleTable
                     ? $"{_sqlAdapter.AppendQuote(col.Name)}"
                     : $"{_sqlAdapter.AppendQuote(descriptor.Alias)}.{_sqlAdapter.AppendQuote(col.Name)}");
@@ -802,6 +860,64 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
                 sqlBuilder.AppendFormat("{0}({1}) AS {2},", funcName, colName, alias);
             }
         }
+
+        #region ==解析排除列==
+
+        /// <summary>
+        /// 解析排除列的名称列表
+        /// </summary>
+        /// <returns></returns>
+        private List<IColumnDescriptor> ResolveSelectExcludeCols()
+        {
+            if (_queryBody.SelectExclude != null && _queryBody.SelectExclude is LambdaExpression lambda)
+            {
+                //整个实体
+                if (lambda.Body.NodeType == ExpressionType.Parameter)
+                {
+                    throw new ArgumentException("不能排除整个实体");
+                }
+
+                var list = new List<IColumnDescriptor>();
+
+                //返回的某个列
+                if (lambda.Body.NodeType == ExpressionType.MemberAccess)
+                {
+                    var col = _queryBody.GetColumnDescriptor(lambda.Body as MemberExpression, lambda);
+                    if (col != null)
+                        list.Add(col);
+
+                    return list;
+                }
+
+                //自定义的返回对象
+                if (lambda.Body.NodeType == ExpressionType.New)
+                {
+                    var newExp = lambda.Body as NewExpression;
+                    for (var i = 0; i < newExp.Arguments.Count; i++)
+                    {
+                        var arg = newExp.Arguments[i];
+                        //实体
+                        if (arg.NodeType == ExpressionType.Parameter)
+                        {
+                            throw new ArgumentException("不能排除整个实体");
+                        }
+                        //成员
+                        if (arg.NodeType == ExpressionType.MemberAccess)
+                        {
+                            var col = _queryBody.GetColumnDescriptor(arg as MemberExpression, lambda);
+                            if (col != null)
+                                list.Add(col);
+                        }
+                    }
+                }
+
+                return list;
+            }
+
+            return null;
+        }
+
+        #endregion
 
         /// <summary>
         /// 解析分组条件
@@ -897,5 +1013,6 @@ namespace NetModular.Lib.Data.Core.SqlQueryable.Internal
         {
             return $"{database ?? _sqlAdapter.Database}{_sqlAdapter.AppendQuote(tableName)}";
         }
+
     }
 }

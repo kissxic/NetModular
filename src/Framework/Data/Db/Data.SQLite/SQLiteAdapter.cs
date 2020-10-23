@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using NetModular.Lib.Data.Abstractions;
 using NetModular.Lib.Data.Abstractions.Entities;
 using NetModular.Lib.Data.Abstractions.Enums;
@@ -14,7 +15,7 @@ namespace NetModular.Lib.Data.SQLite
 {
     internal class SQLiteAdapter : SqlAdapterAbstract
     {
-        public SQLiteAdapter(DbOptions dbOptions, DbModuleOptions options) : base(dbOptions, options)
+        public SQLiteAdapter(DbOptions dbOptions, DbModuleOptions options, ILoggerFactory loggerFactory) : base(dbOptions, options, loggerFactory?.CreateLogger<SQLiteAdapter>())
         {
         }
 
@@ -108,12 +109,13 @@ namespace NetModular.Lib.Data.SQLite
             {
                 if (!entityDescriptor.Ignore)
                 {
-                    cmd.CommandText =
-                        $"SELECT 1 FROM sqlite_master WHERE type = 'table' and name='{entityDescriptor.TableName}';";
+                    cmd.CommandText = $"SELECT 1 FROM sqlite_master WHERE type = 'table' and name='{entityDescriptor.TableName}';";
                     var obj = cmd.ExecuteScalar();
                     if (obj.ToInt() < 1)
                     {
-                        cmd.CommandText = CreateTableSql(entityDescriptor);
+                        var sql = GetCreateTableSql(entityDescriptor);
+                        Logger?.LogInformation("执行创建表SQL：{@sql}", sql);
+                        cmd.CommandText = sql;
                         cmd.ExecuteNonQuery();
                     }
                 }
@@ -126,52 +128,10 @@ namespace NetModular.Lib.Data.SQLite
             }
         }
 
-        private string CreateTableSql(IEntityDescriptor entityDescriptor)
+        public override string GetColumnTypeName(IColumnDescriptor column, out string defaultValue)
         {
-            var columns = entityDescriptor.Columns;
-            var sql = new StringBuilder();
-            sql.AppendFormat("CREATE TABLE {0}(", AppendQuote(entityDescriptor.TableName));
+            defaultValue = "";
 
-            for (int i = 0; i < columns.Count; i++)
-            {
-                var column = columns[i];
-
-                sql.AppendFormat("`{0}` ", column.Name);
-                sql.AppendFormat("{0} ", Property2Column(column));
-
-                if (column.IsPrimaryKey)
-                {
-                    sql.Append("PRIMARY KEY ");
-
-                    if (entityDescriptor.PrimaryKey.IsInt() || entityDescriptor.PrimaryKey.IsLong())
-                    {
-                        sql.Append("AUTOINCREMENT ");
-                    }
-                }
-
-                if (!column.Nullable)
-                {
-                    sql.Append("NOT NULL ");
-                }
-
-                if (i < columns.Count - 1)
-                {
-                    sql.Append(",");
-                }
-            }
-
-            sql.Append(")");
-
-            return sql.ToString();
-        }
-
-        /// <summary>
-        /// 属性转换为列
-        /// </summary>
-        /// <param name="column"></param>
-        /// <returns></returns>
-        public string Property2Column(IColumnDescriptor column)
-        {
             var propertyType = column.PropertyInfo.PropertyType;
             var isNullable = propertyType.IsNullable();
             if (isNullable)
@@ -208,6 +168,45 @@ namespace NetModular.Lib.Data.SQLite
                 default:
                     return "text";
             }
+        }
+
+        public override string GetCreateTableSql(IEntityDescriptor entityDescriptor, string tableName = null)
+        {
+            var columns = entityDescriptor.Columns;
+            var sql = new StringBuilder();
+            sql.AppendFormat("CREATE TABLE {0}(", AppendQuote(tableName ?? entityDescriptor.TableName));
+
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var column = columns[i];
+
+                sql.AppendFormat("`{0}` ", column.Name);
+                sql.AppendFormat("{0} ", column.TypeName);
+
+                if (column.IsPrimaryKey)
+                {
+                    sql.Append("PRIMARY KEY ");
+
+                    if (entityDescriptor.PrimaryKey.IsInt() || entityDescriptor.PrimaryKey.IsLong())
+                    {
+                        sql.Append("AUTOINCREMENT ");
+                    }
+                }
+
+                if (!column.Nullable)
+                {
+                    sql.Append("NOT NULL ");
+                }
+
+                if (i < columns.Count - 1)
+                {
+                    sql.Append(",");
+                }
+            }
+
+            sql.Append(")");
+
+            return sql.ToString();
         }
     }
 }

@@ -238,6 +238,12 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
             return this;
         }
 
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5> SelectExclude<TResult>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TResult>> expression)
+        {
+            QueryBody.SetSelectExclude(expression);
+            return this;
+        }
+
         public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6> LeftJoin<TEntity6>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, bool>> onExpression, string tableName = null, bool noLock = true) where TEntity6 : IEntity, new()
         {
             return new NetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6>(Db, QueryBody, onExpression, JoinType.Left, tableName, noLock);
@@ -336,6 +342,12 @@ namespace NetModular.Lib.Data.Core.SqlQueryable
         public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5> IncludeDeleted()
         {
             QueryBody.FilterDeleted = false;
+            return this;
+        }
+
+        public INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5> NotFilterTenant()
+        {
+            QueryBody.FilterTenant = false;
             return this;
         }
 

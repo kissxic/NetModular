@@ -274,6 +274,14 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         /// <returns></returns>
         INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9> Select<TResult>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9, TResult>> selectExpression);
 
+        /// <summary>
+        /// 查询排除指定列
+        /// </summary>
+        /// <typeparam name="TResult"></typeparam>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9> SelectExclude<TResult>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9, TResult>> expression);
+
         #endregion
 
         #region ==Join==
@@ -397,7 +405,7 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         /// </summary>
         /// <returns></returns>
         IGroupByQueryable9<TResult, TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9> GroupBy<TResult>(Expression<Func<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9, TResult>> expression);
-        
+
         /// <summary>
         /// 分组(group by 1)
         /// </summary>
@@ -427,14 +435,14 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         /// <summary>
         /// 分页查询，返回实体类型
         /// </summary>
-        /// <param name="paging"></param>
+        /// <param name="paging">分页对象</param>
         /// <returns></returns>
         new IList<TEntity> Pagination(Paging paging = null);
 
         /// <summary>
         /// 分页查询，返回实体类型
         /// </summary>
-        /// <param name="paging"></param>
+        /// <param name="paging">分页对象</param>
         /// <returns></returns>
         new Task<IList<TEntity>> PaginationAsync(Paging paging = null);
 
@@ -463,6 +471,16 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         /// </summary>
         /// <returns></returns>
         INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9> IncludeDeleted();
+
+        #endregion
+
+        #region ==NotFilterTenant==
+
+        /// <summary>
+        /// 不过滤租户
+        /// </summary>
+        /// <returns></returns>
+        INetSqlQueryable<TEntity, TEntity2, TEntity3, TEntity4, TEntity5, TEntity6, TEntity7, TEntity8, TEntity9> NotFilterTenant();
 
         #endregion
 

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using MySql.Data.MySqlClient;
 using NetModular.Lib.Data.Abstractions;
 using NetModular.Lib.Data.Abstractions.Entities;
@@ -13,7 +14,7 @@ namespace NetModular.Lib.Data.MySql
 {
     internal class MySqlAdapter : SqlAdapterAbstract
     {
-        public MySqlAdapter(DbOptions dbOptions, DbModuleOptions options) : base(dbOptions, options)
+        public MySqlAdapter(DbOptions dbOptions, DbModuleOptions options, ILoggerFactory loggerFactory) : base(dbOptions, options, loggerFactory?.CreateLogger<MySqlAdapter>())
         {
         }
 
@@ -109,7 +110,9 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!entityDescriptor.Ignore)
                 {
-                    cmd.CommandText = CreateTableSql(entityDescriptor);
+                    var sql = GetCreateTableSql(entityDescriptor);
+                    Logger?.LogInformation("执行创建表SQL：{@sql}", sql);
+                    cmd.CommandText = sql;
                     cmd.ExecuteNonQuery();
                 }
             }
@@ -119,63 +122,13 @@ namespace NetModular.Lib.Data.MySql
                 //执行创建后事件
                 events?.After().GetAwaiter().GetResult();
             }
+
+            con.Close();
         }
 
-        private string CreateTableSql(IEntityDescriptor entityDescriptor)
+        public override string GetColumnTypeName(IColumnDescriptor column, out string defaultValue)
         {
-            var columns = entityDescriptor.Columns;
-            var sql = new StringBuilder();
-            sql.AppendFormat("CREATE TABLE IF NOT EXISTS {0}(", AppendQuote(entityDescriptor.TableName));
-
-            for (int i = 0; i < columns.Count; i++)
-            {
-                var column = columns[i];
-
-                sql.AppendFormat("`{0}` ", column.Name);
-                sql.AppendFormat("{0} ", Property2Column(column, out string def));
-
-                if (column.IsPrimaryKey)
-                {
-                    sql.Append("PRIMARY KEY ");
-
-                    if (entityDescriptor.PrimaryKey.IsInt() || entityDescriptor.PrimaryKey.IsLong())
-                    {
-                        sql.Append("AUTO_INCREMENT ");
-                    }
-
-                    def = string.Empty;
-                }
-
-                if (!column.Nullable)
-                {
-                    sql.Append("NOT NULL ");
-                }
-
-                if (def.NotNull())
-                {
-                    sql.Append(def);
-                }
-
-                if (i < columns.Count - 1)
-                {
-                    sql.Append(",");
-                }
-            }
-
-            sql.Append(") ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;");
-
-            return sql.ToString();
-        }
-
-        /// <summary>
-        /// 属性转换为列
-        /// </summary>
-        /// <param name="column"></param>
-        /// <param name="def"></param>
-        /// <returns></returns>
-        public string Property2Column(IColumnDescriptor column, out string def)
-        {
-            def = "";
+            defaultValue = "";
             var propertyType = column.PropertyInfo.PropertyType;
             var isNullable = propertyType.IsNullable();
             if (isNullable)
@@ -189,7 +142,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
 
                 return "SMALLINT(3)";
@@ -214,7 +167,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
                 return "BIT";
             }
@@ -223,7 +176,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
                 return "TINYINT(1)";
             }
@@ -232,7 +185,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
                 return "INT";
             }
@@ -241,7 +194,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
                 return "BIGINT";
             }
@@ -250,7 +203,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT CURRENT_TIMESTAMP(0)";
+                    defaultValue = "DEFAULT CURRENT_TIMESTAMP(0)";
                 }
                 return "DATETIME(0)";
             }
@@ -259,7 +212,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
 
                 var m = column.PrecisionM < 1 ? 18 : column.PrecisionM;
@@ -272,7 +225,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
 
                 var m = column.PrecisionM < 1 ? 18 : column.PrecisionM;
@@ -285,7 +238,7 @@ namespace NetModular.Lib.Data.MySql
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT 0";
+                    defaultValue = "DEFAULT 0";
                 }
 
                 var m = column.PrecisionM < 1 ? 18 : column.PrecisionM;
@@ -295,6 +248,50 @@ namespace NetModular.Lib.Data.MySql
             }
 
             return string.Empty;
+        }
+
+        public override string GetCreateTableSql(IEntityDescriptor entityDescriptor, string tableName = null)
+        {
+            var columns = entityDescriptor.Columns;
+            var sql = new StringBuilder();
+            sql.AppendFormat("CREATE TABLE IF NOT EXISTS {0}(", AppendQuote(tableName ?? entityDescriptor.TableName));
+
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var column = columns[i];
+
+                sql.AppendFormat("`{0}` ", column.Name);
+                sql.AppendFormat("{0} ", column.TypeName);
+
+                if (column.IsPrimaryKey)
+                {
+                    sql.Append("PRIMARY KEY ");
+
+                    if (entityDescriptor.PrimaryKey.IsInt() || entityDescriptor.PrimaryKey.IsLong())
+                    {
+                        sql.Append("AUTO_INCREMENT ");
+                    }
+                }
+
+                if (!column.Nullable)
+                {
+                    sql.Append("NOT NULL ");
+                }
+
+                if (!column.IsPrimaryKey && column.DefaultValue.NotNull())
+                {
+                    sql.Append(column.DefaultValue);
+                }
+
+                if (i < columns.Count - 1)
+                {
+                    sql.Append(",");
+                }
+            }
+
+            sql.Append(") ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;");
+
+            return sql.ToString();
         }
     }
 }

@@ -28,6 +28,11 @@ namespace NetModular.Lib.Auth.Abstractions
         public bool SingleAccount { get; set; }
 
         /// <summary>
+        /// 启用审计日志
+        /// </summary>
+        public bool Auditing { get; set; }
+
+        /// <summary>
         /// Jwt配置
         /// </summary>
         public JwtConfig Jwt { get; set; } = new JwtConfig();
@@ -35,7 +40,7 @@ namespace NetModular.Lib.Auth.Abstractions
         /// <summary>
         /// 登录
         /// </summary>
-        public LoginMode LoginMode { get; set; } = new LoginMode();
+        public LoginModeConfig LoginMode { get; set; } = new LoginModeConfig();
     }
 
     /// <summary>
@@ -72,7 +77,7 @@ namespace NetModular.Lib.Auth.Abstractions
     /// <summary>
     /// 登录方式
     /// </summary>
-    public class LoginMode
+    public class LoginModeConfig
     {
         /// <summary>
         /// 用户名登录

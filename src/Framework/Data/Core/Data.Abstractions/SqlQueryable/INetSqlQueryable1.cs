@@ -263,10 +263,18 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         #region ==Select==
 
         /// <summary>
-        /// 查询指定列
+        /// 查询返回指定列
         /// </summary>
         /// <returns></returns>
         INetSqlQueryable<TEntity> Select<TResult>(Expression<Func<TEntity, TResult>> expression);
+
+        /// <summary>
+        /// 查询排除指定列
+        /// </summary>
+        /// <typeparam name="TResult"></typeparam>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        INetSqlQueryable<TEntity> SelectExclude<TResult>(Expression<Func<TEntity, TResult>> expression);
 
         #endregion
 
@@ -541,14 +549,14 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         /// <summary>
         /// 分页查询，返回实体类型
         /// </summary>
-        /// <param name="paging"></param>
+        /// <param name="paging">分页对象</param>
         /// <returns></returns>
         new IList<TEntity> Pagination(Paging paging = null);
 
         /// <summary>
         /// 分页查询，返回实体类型
         /// </summary>
-        /// <param name="paging"></param>
+        /// <param name="paging">分页对象</param>
         /// <returns></returns>
         new Task<IList<TEntity>> PaginationAsync(Paging paging = null);
 
@@ -577,6 +585,16 @@ namespace NetModular.Lib.Data.Abstractions.SqlQueryable
         /// </summary>
         /// <returns></returns>
         INetSqlQueryable<TEntity> IncludeDeleted();
+
+        #endregion
+
+        #region ==NotFilterTenant==
+
+        /// <summary>
+        /// 不过滤租户
+        /// </summary>
+        /// <returns></returns>
+        INetSqlQueryable<TEntity> NotFilterTenant();
 
         #endregion
 

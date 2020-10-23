@@ -7,14 +7,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using NetModular.Lib.Auth.Abstractions;
+using NetModular.Lib.Auth.Abstractions.LoginModels;
 using NetModular.Lib.Auth.Web;
 using NetModular.Lib.Auth.Web.Attributes;
-using NetModular.Lib.Module.AspNetCore.Attributes;
 using NetModular.Lib.Utils.Mvc.Helpers;
 using NetModular.Module.Admin.Application.AuthService;
-using NetModular.Module.Admin.Application.AuthService.ResultModels;
-using NetModular.Module.Admin.Application.AuthService.ViewModels;
-using NetModular.Module.Admin.Web.Core;
 
 namespace NetModular.Module.Admin.Web.Controllers
 {
@@ -94,8 +91,21 @@ namespace NetModular.Module.Admin.Web.Controllers
         [HttpPost("phone")]
         [AllowAnonymous]
         [DisableAuditing]
-        [Description("手机号登录登录")]
+        [Description("手机号登录")]
         public async Task<IResultModel> Login(PhoneLoginModel model)
+        {
+            model.IP = _ipHelper.IP;
+            model.UserAgent = _ipHelper.UserAgent;
+
+            var result = await _service.Login(model);
+            return LoginHandle(result);
+        }
+
+        [HttpPost("custom")]
+        [AllowAnonymous]
+        [DisableAuditing]
+        [Description("自定义登录")]
+        public async Task<IResultModel> Custom(CustomLoginModel model)
         {
             model.IP = _ipHelper.IP;
             model.UserAgent = _ipHelper.UserAgent;
@@ -107,37 +117,36 @@ namespace NetModular.Module.Admin.Web.Controllers
         /// <summary>
         /// 登录处理
         /// </summary>
-        private IResultModel LoginHandle(ResultModel<LoginResultModel> result)
+        private IResultModel LoginHandle(LoginResultModel result)
         {
-            if (result.Successful)
+            if (result.Success)
             {
-                var account = result.Data.Account;
-                var loginInfo = result.Data.AuthInfo;
                 var claims = new List<Claim>
                 {
-                    new Claim(ClaimsName.AccountId, account.Id.ToString()),
-                    new Claim(ClaimsName.AccountName, account.Name),
-                    new Claim(ClaimsName.AccountType, account.Type.ToInt().ToString()),
-                    new Claim(ClaimsName.Platform, loginInfo.Platform.ToInt().ToString()),
-                    new Claim(ClaimsName.LoginTime, loginInfo.LoginTime.ToString())
+                    new Claim(ClaimsName.TenantId, result.TenantId != null ? result.TenantId.ToString() : ""),
+                    new Claim(ClaimsName.AccountId, result.AccountId.ToString()),
+                    new Claim(ClaimsName.AccountName, result.Name),
+                    new Claim(ClaimsName.AccountType, result.AccountType.ToInt().ToString()),
+                    new Claim(ClaimsName.Platform, result.Platform.ToInt().ToString()),
+                    new Claim(ClaimsName.LoginTime, result.LoginTime.ToTimestamp().ToString())
                 };
 
                 //自定义扩展Claims
-                var extendClaims = _claimsExtendProvider.GetExtendClaims(account);
+                var extendClaims = _claimsExtendProvider.GetExtendClaims(result.AccountId);
                 if (extendClaims != null && extendClaims.Any())
                     claims.AddRange(extendClaims);
 
-                return _loginHandler.Hand(claims, loginInfo.RefreshToken);
+                return _loginHandler.Hand(claims, result.RefreshToken);
             }
 
-            return ResultModel.Failed(result.Msg);
+            return ResultModel.Failed(result.Error);
         }
 
         [HttpGet]
         [AllowAnonymous]
         [DisableAuditing]
         [Description("刷新令牌")]
-        public async Task<IResultModel> RefreshToken([BindRequired]string refreshToken)
+        public async Task<IResultModel> RefreshToken([BindRequired] string refreshToken)
         {
             var result = await _service.RefreshToken(refreshToken);
             return LoginHandle(result);

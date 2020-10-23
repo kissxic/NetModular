@@ -14,10 +14,18 @@ namespace NetModular.Lib.Utils.Core.Attributes
         public bool Itself { get; set; }
 
         /// <summary>
+        /// 
+        /// </summary>
+        public SingletonAttribute()
+        {
+            Itself = false;
+        }
+
+        /// <summary>
         /// 是否使用自身的类型进行注入
         /// </summary>
         /// <param name="itself"></param>
-        public SingletonAttribute(bool itself = false)
+        public SingletonAttribute(bool itself)
         {
             Itself = itself;
         }

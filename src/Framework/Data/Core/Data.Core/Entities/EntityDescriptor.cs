@@ -72,6 +72,8 @@ namespace NetModular.Lib.Data.Core.Entities
 
         public bool IsEntityBase { get; }
 
+        public bool IsTenant { get; }
+
         #endregion
 
         #region ==构造器==
@@ -100,10 +102,12 @@ namespace NetModular.Lib.Data.Core.Entities
 
             SetColumns();
 
-            var sqlBuilder = new EntitySqlBuilder(this);
+            var sqlBuilder = new EntitySqlBuilder(this, dbContext.Options.DbOptions);
             Sql = sqlBuilder.Build();
 
             IsEntityBase = EntityType.IsSubclassOfGeneric(typeof(EntityBase<>)) || EntityType.IsSubclassOfGeneric(typeof(EntityBaseWithSoftDelete<,>));
+
+            IsTenant = typeof(ITenant).IsAssignableFrom(EntityType);
         }
 
         #endregion
@@ -177,7 +181,7 @@ namespace NetModular.Lib.Data.Core.Entities
 
             foreach (var p in properties)
             {
-                var column = new ColumnDescriptor(p);
+                var column = new ColumnDescriptor(p, SqlAdapter);
                 if (column.IsPrimaryKey)
                 {
                     PrimaryKey = new PrimaryKeyDescriptor(p);

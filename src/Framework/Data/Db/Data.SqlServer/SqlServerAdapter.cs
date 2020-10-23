@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using NetModular.Lib.Data.Abstractions;
 using NetModular.Lib.Data.Abstractions.Entities;
 using NetModular.Lib.Data.Abstractions.Options;
@@ -12,7 +13,7 @@ namespace NetModular.Lib.Data.SqlServer
 {
     public class SqlServerAdapter : SqlAdapterAbstract
     {
-        public SqlServerAdapter(DbOptions dbOptions, DbModuleOptions options) : base(dbOptions, options)
+        public SqlServerAdapter(DbOptions dbOptions, DbModuleOptions options, ILoggerFactory loggerFactory) : base(dbOptions, options, loggerFactory?.CreateLogger<SqlServerAdapter>())
         {
         }
 
@@ -142,7 +143,9 @@ namespace NetModular.Lib.Data.SqlServer
                     var obj = cmd.ExecuteScalar();
                     if (obj.ToInt() < 1)
                     {
-                        cmd.CommandText = CreateTableSql(entityDescriptor);
+                        var sql = GetCreateTableSql(entityDescriptor);
+                        Logger?.LogInformation("执行创建表SQL：{@sql}", sql);
+                        cmd.CommandText = sql;
                         cmd.ExecuteNonQuery();
                     }
                 }
@@ -155,61 +158,9 @@ namespace NetModular.Lib.Data.SqlServer
             }
         }
 
-        private string CreateTableSql(IEntityDescriptor entityDescriptor)
+        public override string GetColumnTypeName(IColumnDescriptor column, out string defaultValue)
         {
-            var columns = entityDescriptor.Columns;
-            var sql = new StringBuilder();
-            sql.AppendFormat("CREATE TABLE [{0}](", entityDescriptor.TableName);
-
-            for (int i = 0; i < columns.Count; i++)
-            {
-                var column = columns[i];
-
-                sql.AppendFormat("[{0}] ", column.Name);
-                sql.AppendFormat("{0} ", Property2Column(column, out string def));
-
-                if (column.IsPrimaryKey)
-                {
-                    sql.Append("PRIMARY KEY ");
-
-                    if (entityDescriptor.PrimaryKey.IsInt() || entityDescriptor.PrimaryKey.IsLong())
-                    {
-                        sql.Append("IDENTITY(1,1) ");
-                    }
-
-                    def = string.Empty;
-                }
-
-                if (!column.Nullable)
-                {
-                    sql.Append("NOT NULL ");
-                }
-
-                if (def.NotNull())
-                {
-                    sql.Append(def);
-                }
-
-                if (i < columns.Count - 1)
-                {
-                    sql.Append(",");
-                }
-            }
-
-            sql.Append(");");
-
-            return sql.ToString();
-        }
-
-        /// <summary>
-        /// 属性转换为列
-        /// </summary>
-        /// <param name="column"></param>
-        /// <param name="def"></param>
-        /// <returns></returns>
-        public string Property2Column(IColumnDescriptor column, out string def)
-        {
-            def = "";
+            defaultValue = "";
             var propertyType = column.PropertyInfo.PropertyType;
             var isNullable = propertyType.IsNullable();
             if (isNullable)
@@ -223,7 +174,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
 
                 return "SMALLINT";
@@ -248,7 +199,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
                 return "BIT";
             }
@@ -257,7 +208,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
                 return "TINYINT(1)";
             }
@@ -266,7 +217,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
                 return "INT";
             }
@@ -275,7 +226,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
                 return "BIGINT";
             }
@@ -284,7 +235,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(GETDATE())";
+                    defaultValue = "DEFAULT(GETDATE())";
                 }
                 return "DATETIME";
             }
@@ -293,7 +244,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
 
                 var m = column.PrecisionM < 1 ? 18 : column.PrecisionM;
@@ -306,7 +257,7 @@ namespace NetModular.Lib.Data.SqlServer
             {
                 if (!isNullable)
                 {
-                    def = "DEFAULT(0)";
+                    defaultValue = "DEFAULT(0)";
                 }
 
                 var m = column.PrecisionM < 1 ? 18 : column.PrecisionM;
@@ -316,6 +267,50 @@ namespace NetModular.Lib.Data.SqlServer
             }
 
             return string.Empty;
+        }
+
+        public override string GetCreateTableSql(IEntityDescriptor entityDescriptor, string tableName = null)
+        {
+            var columns = entityDescriptor.Columns;
+            var sql = new StringBuilder();
+            sql.AppendFormat("CREATE TABLE [{0}](", tableName ?? entityDescriptor.TableName);
+
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var column = columns[i];
+
+                sql.AppendFormat("[{0}] ", column.Name);
+                sql.AppendFormat("{0} ", column.TypeName);
+
+                if (column.IsPrimaryKey)
+                {
+                    sql.Append("PRIMARY KEY ");
+
+                    if (entityDescriptor.PrimaryKey.IsInt() || entityDescriptor.PrimaryKey.IsLong())
+                    {
+                        sql.Append("IDENTITY(1,1) ");
+                    }
+                }
+
+                if (!column.Nullable)
+                {
+                    sql.Append("NOT NULL ");
+                }
+
+                if (!column.IsPrimaryKey && column.DefaultValue.NotNull())
+                {
+                    sql.Append(column.DefaultValue);
+                }
+
+                if (i < columns.Count - 1)
+                {
+                    sql.Append(",");
+                }
+            }
+
+            sql.Append(");");
+
+            return sql.ToString();
         }
     }
 }
